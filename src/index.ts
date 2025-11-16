@@ -1,4 +1,5 @@
 import http, { IncomingMessage, ServerResponse } from "http";
+import https from "https";
 
 const PORT = process.env.PORT || 8001;
 
@@ -59,22 +60,32 @@ const server = http.createServer(
           query,
         )}&format=json&no_redirect=1&no_html=1`;
 
-        const response = await fetch(ddgUrl);
-
-        if (!response.ok) {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              result: {
-                type: "error",
-                message: `DuckDuckGo request failed with status ${response.status}`,
-              },
-            }),
-          );
-          return;
-        }
-
-        const data = (await response.json()) as any;
+        // Use Node's https module instead of fetch for compatibility
+        const data = await new Promise<any>((resolve, reject) => {
+          https
+            .get(ddgUrl, (response) => {
+              let body = "";
+              response.on("data", (chunk) => (body += chunk));
+              response.on("end", () => {
+                if (response.statusCode !== 200) {
+                  reject(
+                    new Error(
+                      `DuckDuckGo request failed with status ${response.statusCode}`,
+                    ),
+                  );
+                  return;
+                }
+                try {
+                  resolve(JSON.parse(body));
+                } catch (err) {
+                  reject(new Error(`Failed to parse JSON: ${err}`));
+                }
+              });
+            })
+            .on("error", (err) => {
+              reject(new Error(`Request failed: ${err.message}`));
+            });
+        });
 
         const results: SearchResult[] = [];
 

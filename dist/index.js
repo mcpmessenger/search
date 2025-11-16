@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const http_1 = __importDefault(require("http"));
+const https_1 = __importDefault(require("https"));
 const PORT = process.env.PORT || 8001;
 const server = http_1.default.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/invoke") {
@@ -37,18 +38,29 @@ const server = http_1.default.createServer(async (req, res) => {
                 }
                 // Call DuckDuckGo Instant Answer API
                 const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1`;
-                const response = await fetch(ddgUrl);
-                if (!response.ok) {
-                    res.writeHead(502, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({
-                        result: {
-                            type: "error",
-                            message: `DuckDuckGo request failed with status ${response.status}`,
-                        },
-                    }));
-                    return;
-                }
-                const data = (await response.json());
+                // Use Node's https module instead of fetch for compatibility
+                const data = await new Promise((resolve, reject) => {
+                    https_1.default
+                        .get(ddgUrl, (response) => {
+                        let body = "";
+                        response.on("data", (chunk) => (body += chunk));
+                        response.on("end", () => {
+                            if (response.statusCode !== 200) {
+                                reject(new Error(`DuckDuckGo request failed with status ${response.statusCode}`));
+                                return;
+                            }
+                            try {
+                                resolve(JSON.parse(body));
+                            }
+                            catch (err) {
+                                reject(new Error(`Failed to parse JSON: ${err}`));
+                            }
+                        });
+                    })
+                        .on("error", (err) => {
+                        reject(new Error(`Request failed: ${err.message}`));
+                    });
+                });
                 const results = [];
                 // Use Abstract as a first result when present
                 if (data.Abstract && data.AbstractURL) {
