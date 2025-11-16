@@ -35,20 +35,62 @@ const server = http_1.default.createServer(async (req, res) => {
                     }));
                     return;
                 }
-                // TODO: plug in real search; placeholder returns echo
-                const results = [
-                    {
-                        title: `Result for "${query}"`,
-                        url: "https://example.com",
-                        snippet: "Replace this with a real search implementation.",
-                    },
-                ].slice(0, maxResults);
+                // Call DuckDuckGo Instant Answer API
+                const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1`;
+                const response = await fetch(ddgUrl);
+                if (!response.ok) {
+                    res.writeHead(502, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({
+                        result: {
+                            type: "error",
+                            message: `DuckDuckGo request failed with status ${response.status}`,
+                        },
+                    }));
+                    return;
+                }
+                const data = (await response.json());
+                const results = [];
+                // Use Abstract as a first result when present
+                if (data.Abstract && data.AbstractURL) {
+                    results.push({
+                        title: data.Heading || data.AbstractText || query,
+                        url: data.AbstractURL,
+                        snippet: data.Abstract,
+                    });
+                }
+                const related = Array.isArray(data.RelatedTopics)
+                    ? data.RelatedTopics
+                    : [];
+                const pushTopic = (topic) => {
+                    if (!topic || (!topic.Text && !topic.FirstURL))
+                        return;
+                    results.push({
+                        title: topic.Text || topic.FirstURL || query,
+                        url: topic.FirstURL || data.AbstractURL || "https://duckduckgo.com",
+                        snippet: topic.Text || "",
+                    });
+                };
+                for (const topic of related) {
+                    if (topic && Array.isArray(topic.Topics)) {
+                        for (const sub of topic.Topics) {
+                            pushTopic(sub);
+                            if (results.length >= maxResults)
+                                break;
+                        }
+                    }
+                    else {
+                        pushTopic(topic);
+                    }
+                    if (results.length >= maxResults)
+                        break;
+                }
+                const limitedResults = results.slice(0, maxResults);
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({
                     result: {
                         type: "json",
-                        data: { query, maxResults, results },
-                        summary: `Top ${results.length} placeholder results for "${query}".`,
+                        data: { query, maxResults, results: limitedResults },
+                        summary: `Top ${limitedResults.length} DuckDuckGo results for "${query}".`,
                     },
                 }));
             }
